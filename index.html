@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="fil">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#000000" />
+  <title>Falcon Cam</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main id="app">
+    <!-- ===== Camera stage (9:16) ===== -->
+    <section id="stage">
+      <video id="cam" playsinline autoplay muted></video>
+      <canvas id="recCanvas" hidden></canvas>
+
+      <!-- Camera-lens marker: ito ang dapat tingnan -->
+      <div id="lensMarker" title="Nandito ang camera — dito tumingin">▲ camera</div>
+
+      <!-- Teleprompter: nasa itaas, malapit sa lens, makitid para hindi gumagalaw ang mata -->
+      <div id="prompter" class="hidden">
+        <div id="prompterScroll"><div id="prompterText"></div></div>
+        <div id="readLine"></div>
+      </div>
+
+      <!-- Eye-contact indicator -->
+      <div id="gazeBadge" class="hidden"><span class="dot"></span><span id="gazeText">Eye contact…</span></div>
+
+      <!-- Top info -->
+      <div id="topBar">
+        <div id="timer">00:00</div>
+        <div id="musicTag" class="hidden">♪ <span id="musicTagName"></span></div>
+      </div>
+      <div id="progress"><div id="progressBar"></div></div>
+
+      <div id="countdown" class="hidden">3</div>
+      <div id="toast" class="hidden"></div>
+
+      <div id="startOverlay">
+        <h1>Falcon Cam</h1>
+        <p>Video camera na may sariling background music at teleprompter na naka-eye-contact.</p>
+        <button id="startBtn" class="primary">Buksan ang Camera</button>
+        <p class="small" id="startErr"></p>
+      </div>
+    </section>
+
+    <!-- ===== Side tools (TikTok-style) ===== -->
+    <aside id="sideTools">
+      <button class="tool" id="flipBtn"><span class="ic">⟲</span><span>Flip</span></button>
+      <button class="tool" id="musicBtn"><span class="ic">♪</span><span>Music</span></button>
+      <button class="tool" id="scriptBtn"><span class="ic">📜</span><span>Script</span></button>
+      <button class="tool" id="eyeBtn"><span class="ic">👁</span><span>Eye</span></button>
+      <button class="tool" id="timerBtn"><span class="ic">⏱</span><span id="timerBtnLbl">3s</span></button>
+    </aside>
+
+    <!-- ===== Bottom controls ===== -->
+    <footer id="bottom">
+      <div id="durations">
+        <button data-dur="15">15s</button>
+        <button data-dur="60" class="active">60s</button>
+        <button data-dur="180">3m</button>
+        <button data-dur="600">10m</button>
+      </div>
+      <div id="recRow">
+        <button id="pauseBtn" class="round small-round hidden" title="Pause">❚❚</button>
+        <button id="recBtn" title="Record"><span></span></button>
+        <button id="stopBtn" class="round small-round hidden" title="Tapos na">✓</button>
+      </div>
+    </footer>
+
+    <!-- ===== Sheets ===== -->
+    <div id="sheetBackdrop" class="hidden"></div>
+
+    <section class="sheet hidden" id="musicSheet">
+      <header><h2>Background Music</h2><button class="close">✕</button></header>
+      <label class="filebtn">Pumili ng music file (mp3, m4a, wav…)
+        <input type="file" id="musicFile" accept="audio/*" />
+      </label>
+      <div id="musicInfo" class="muted">Walang napiling music.</div>
+      <audio id="musicPreview" controls class="hidden"></audio>
+      <div class="row"><label>Simula ng music (segundo)</label><input type="number" id="musicStart" min="0" step="0.5" value="0" /></div>
+      <div class="row"><label>Lakas ng music <b id="musicVolLbl">60%</b></label><input type="range" id="musicVol" min="0" max="100" value="60" /></div>
+      <div class="row"><label>Lakas ng boses (mic) <b id="micVolLbl">100%</b></label><input type="range" id="micVol" min="0" max="200" value="100" /></div>
+      <div class="row check"><input type="checkbox" id="musicLoop" checked /><label for="musicLoop">I-loop ang music</label></div>
+      <div class="row check"><input type="checkbox" id="musicMonitor" checked /><label for="musicMonitor">Marinig ang music habang nagre-record (gumamit ng earphones para malinis)</label></div>
+      <button id="musicClear" class="ghost">Alisin ang music</button>
+    </section>
+
+    <section class="sheet hidden" id="scriptSheet">
+      <header><h2>Teleprompter Script</h2><button class="close">✕</button></header>
+      <textarea id="scriptInput" placeholder="I-paste o i-type dito ang script mo…"></textarea>
+      <label class="filebtn small">Mag-load ng .txt file<input type="file" id="scriptFile" accept=".txt,text/plain" /></label>
+      <div class="row check"><input type="checkbox" id="prompterOn" checked /><label for="prompterOn">Ipakita ang teleprompter</label></div>
+      <div class="row"><label>Bilis ng scroll <b id="speedLbl">5</b></label><input type="range" id="speed" min="1" max="20" value="5" /></div>
+      <div class="row"><label>Laki ng letra <b id="fontLbl">26px</b></label><input type="range" id="fontSize" min="16" max="48" value="26" /></div>
+      <div class="row"><label>Lapad ng text <b id="widthLbl">60%</b></label><input type="range" id="pWidth" min="35" max="95" value="60" /></div>
+      <div class="row"><label>Taas ng box (linya) <b id="linesLbl">4</b></label><input type="range" id="pLines" min="2" max="8" value="4" /></div>
+      <div class="row check"><input type="checkbox" id="pMirror" /><label for="pMirror">I-mirror ang text (para sa glass teleprompter)</label></div>
+      <div class="row check"><input type="checkbox" id="voiceFollow" /><label for="voiceFollow">Voice-follow: sumusunod ang script sa boses mo (Chrome, experimental)</label></div>
+      <div class="row"><label>Wika para sa voice-follow</label>
+        <select id="voiceLang"><option value="fil-PH">Filipino</option><option value="en-US">English (US)</option><option value="en-PH">English (PH)</option></select>
+      </div>
+      <p class="muted small">Tip: I-tap ang script para i-pause/i-play. I-drag pataas/pababa para mag-adjust.</p>
+    </section>
+
+    <section class="sheet hidden" id="eyeSheet">
+      <header><h2>Eye Contact Helper</h2><button class="close">✕</button></header>
+      <p class="muted small">Gumagamit ng MediaPipe Face Landmarker (open source, tumatakbo lang sa device mo) para malaman kung nakatingin ka sa camera.</p>
+      <div class="row check"><input type="checkbox" id="eyeOn" /><label for="eyeOn">I-on ang eye-contact detector</label></div>
+      <div class="row check"><input type="checkbox" id="eyeAutoPause" checked /><label for="eyeAutoPause">I-pause ang script kapag tumingin ka sa malayo</label></div>
+      <div class="row"><label>Sensitivity <b id="sensLbl">5</b></label><input type="range" id="sens" min="1" max="10" value="5" /></div>
+      <button id="calibBtn" class="primary">I-calibrate (tumingin sa camera lens, 2 segundo)</button>
+      <div id="eyeStatus" class="muted small">Naka-off.</div>
+    </section>
+
+    <!-- ===== Result ===== -->
+    <section id="result" class="hidden">
+      <video id="resultVideo" playsinline controls></video>
+      <div id="resultStats" class="muted small"></div>
+      <div class="resultBtns">
+        <button id="retakeBtn" class="ghost">↺ Ulitin</button>
+        <button id="shareBtn" class="ghost hidden">Share</button>
+        <a id="downloadBtn" class="primary btnlink" download>⬇ I-save ang Video</a>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
