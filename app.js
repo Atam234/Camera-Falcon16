@@ -55,6 +55,7 @@ const S = {
   musicStart: 0,
   musicLoop: store.get('musicLoop', true),
   musicMonitor: store.get('musicMonitor', true),
+  micMode: store.get('micMode', 'phone'),
   script: store.get('script', 'Hello mga ka-Falcon! Welcome back sa channel ko.\n\nNgayong araw, pag-uusapan natin kung paano gumawa ng magandang vlog gamit lang ang cellphone.\n\nUna, siguraduhin na maliwanag ang paligid mo.\n\nPangalawa, tumingin ka sa camera habang nagsasalita — kaya nasa itaas ang script, malapit sa lens.\n\nPangatlo, mag-enjoy ka lang! I-like at i-follow para sa susunod na video.'),
   prompterOn: store.get('prompterOn', true),
   speed: store.get('speed', 6),
@@ -107,17 +108,53 @@ async function startCamera() {
   await els.cam.play().catch(() => {});
 }
 
+// Mic modes:
+//  'phone'   – raw phone mic, no voice processing. Android keeps the Bluetooth headset in
+//              normal media (A2DP) mode, so it stays connected and you hear the music in stereo.
+//  'headset' – echo cancellation / noise suppression on. Android switches into "call mode",
+//              which can use the Bluetooth headset mic but often makes the headset reconnect
+//              and lowers the audio quality.
+function micConstraints() {
+  const voice = S.micMode === 'headset';
+  return { echoCancellation: voice, noiseSuppression: voice, autoGainControl: voice };
+}
+function stopMic() {
+  if (micSource) { try { micSource.disconnect(); } catch { /* */ } micSource = null; }
+  if (micStream) { micStream.getTracks().forEach((t) => { t.onended = null; t.stop(); }); micStream = null; }
+}
 async function startMic() {
-  micStream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    video: false,
-  });
+  stopMic();
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints(), video: false });
   micSource = audioCtx.createMediaStreamSource(micStream);
   micSource.connect(micGain);
+  // If the device drops the mic (e.g. Bluetooth headset disconnects), get it back without
+  // crashing; the recording keeps going because it records from the mixer, not the mic.
+  micStream.getAudioTracks().forEach((t) => { t.onended = () => recoverMic('ended'); });
 }
+let micRecovering = false;
+async function recoverMic(why) {
+  if (micRecovering || !audioCtx || document.hidden) return;
+  micRecovering = true;
+  try {
+    await sleep(400);
+    await startMic();
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    if (why === 'ended') toast('Naibalik ang mic 🎤');
+  } catch (e) {
+    console.warn('mic recovery failed', e);
+    toast('Nawala ang mic: ' + (e.message || e), 4000);
+  }
+  micRecovering = false;
+}
+// Bluetooth headset connected/disconnected → pick the new default mic.
+let devTimer;
+navigator.mediaDevices?.addEventListener?.('devicechange', () => {
+  clearTimeout(devTimer);
+  devTimer = setTimeout(() => { if (micStream) recoverMic('device'); }, 800);
+});
 
 function initAudioGraph() {
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
   dest = audioCtx.createMediaStreamDestination();
   micGain = audioCtx.createGain();
   musicGain = audioCtx.createGain();
@@ -195,6 +232,11 @@ bindRange('musicVol', 'musicVolLbl', (v) => `${v}%`, applyGains);
 bindRange('micVol', 'micVolLbl', (v) => `${v}%`, applyGains);
 bindCheck('musicLoop', () => { musicEl.loop = S.musicLoop; });
 bindCheck('musicMonitor', applyGains);
+$('micMode').value = S.micMode;
+$('micMode').addEventListener('change', async (e) => {
+  S.micMode = e.target.value; store.set('micMode', S.micMode);
+  if (audioCtx && recState === 'idle') { try { await startMic(); toast('Napalitan ang mic'); } catch (err) { toast('Mic error: ' + err.message); } }
+});
 $('musicStart').addEventListener('input', (e) => { S.musicStart = Math.max(0, +e.target.value || 0); });
 $('musicPreview').addEventListener('pause', (e) => { if (e.target.currentTime) $('musicStart').value = S.musicStart = Math.round(e.target.currentTime * 2) / 2; });
 musicEl.loop = S.musicLoop;
@@ -647,6 +689,24 @@ function updateRecUI() {
   document.getElementById('durations').style.visibility = recState === 'idle' ? 'visible' : 'hidden';
   if (recState === 'idle' && !active) { els.timer.textContent = '00:00'; els.progressBar.style.width = '0'; }
 }
+
+// Free the camera and mic when the app goes to the background (unless recording),
+// so Android/Bluetooth are not held in a capture state; reopen them on return.
+document.addEventListener('visibilitychange', async () => {
+  if (!videoStream || recState !== 'idle') return;
+  if (document.hidden) {
+    videoStream.getTracks().forEach((t) => t.stop());
+    stopMic();
+    musicEl.pause();
+    audioCtx?.suspend().catch(() => {});
+  } else {
+    try {
+      await audioCtx?.resume();
+      await startCamera();
+      await startMic();
+    } catch (e) { toast('Hindi mabuksan ulit ang camera/mic: ' + (e.message || e), 4000); }
+  }
+});
 
 document.addEventListener('keydown', (e) => {
   if (e.target.matches('textarea, input, select')) return;
