@@ -24,7 +24,10 @@ if (IS_NATIVE) {
   } catch (e) { console.error('FalconGallery plugin unavailable', e); }
 }
 
-const OUT_W = 720, OUT_H = 1280, FPS = 30;
+const FPS = 30;
+// Output size (9:16). 720p is the default; 540p is lighter for slower phones.
+const QUALITY = { 720: [720, 1280, 4_000_000], 540: [540, 960, 2_500_000] };
+let OUT_W = 720, OUT_H = 1280;
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -56,6 +59,7 @@ const S = {
   musicLoop: store.get('musicLoop', true),
   musicMonitor: store.get('musicMonitor', true),
   micMode: store.get('micMode', 'phone'),
+  quality: store.get('quality', 720),
   script: store.get('script', 'Hello mga ka-Falcon! Welcome back sa channel ko.\n\nNgayong araw, pag-uusapan natin kung paano gumawa ng magandang vlog gamit lang ang cellphone.\n\nUna, siguraduhin na maliwanag ang paligid mo.\n\nPangalawa, tumingin ka sa camera habang nagsasalita — kaya nasa itaas ang script, malapit sa lens.\n\nPangatlo, mag-enjoy ka lang! I-like at i-follow para sa susunod na video.'),
   prompterOn: store.get('prompterOn', true),
   speed: store.get('speed', 6),
@@ -100,7 +104,9 @@ let musicSource = null, musicUrl = null, musicName = '';
 async function startCamera() {
   if (videoStream) videoStream.getTracks().forEach((t) => t.stop());
   videoStream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: S.facing, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: FPS } },
+    // Ask for about the size we record (landscape numbers; phones rotate to portrait).
+    // Asking for 1080p made the phone decode and scale twice as many pixels for nothing.
+    video: { facingMode: S.facing, width: { ideal: QUALITY[S.quality][1] }, height: { ideal: QUALITY[S.quality][0] }, frameRate: { ideal: FPS, max: FPS } },
     audio: false,
   });
   els.cam.srcObject = videoStream;
@@ -232,6 +238,12 @@ bindRange('musicVol', 'musicVolLbl', (v) => `${v}%`, applyGains);
 bindRange('micVol', 'micVolLbl', (v) => `${v}%`, applyGains);
 bindCheck('musicLoop', () => { musicEl.loop = S.musicLoop; });
 bindCheck('musicMonitor', applyGains);
+$('quality').value = String(S.quality);
+$('quality').addEventListener('change', async (e) => {
+  S.quality = +e.target.value; store.set('quality', S.quality);
+  setOutputSize();
+  if (videoStream && recState === 'idle') { try { await startCamera(); } catch (err) { toast('Camera error: ' + err.message); } }
+});
 $('micMode').value = S.micMode;
 $('micMode').addEventListener('change', async (e) => {
   S.micMode = e.target.value; store.set('micMode', S.micMode);
@@ -320,7 +332,8 @@ function applyPrompterStyle() {
   els.prompter.style.setProperty('--lines', S.pLines);
   els.prompter.style.width = S.pWidth + '%';
   els.prompterScroll.style.transform = S.pMirror ? 'scaleX(-1)' : '';
-  layoutPrompter();
+  lastPY = null;
+  requestAnimationFrame(() => { measurePrompter(); layoutPrompter(); });
 }
 const lineH = () => S.fontSize * 1.35;
 
@@ -339,10 +352,17 @@ function renderPrompter() {
   }
   applyPrompterStyle();
 }
+let lastPY = null;
 function layoutPrompter() {
-  els.prompterText.style.transform = `translateY(${lineH() + 8 - P.y}px)`;
+  const y = Math.round((lineH() + 8 - P.y) * 2) / 2;
+  if (y === lastPY) return; // no DOM write if nothing moved
+  lastPY = y;
+  els.prompterText.style.transform = `translate3d(0, ${y}px, 0)`;
 }
-function maxY() { return Math.max(0, els.prompterText.scrollHeight - lineH()); }
+// Text height is measured once per change (reading scrollHeight every frame forced a re-layout).
+let maxYCache = 0;
+function measurePrompter() { maxYCache = Math.max(0, els.prompterText.scrollHeight - lineH()); }
+function maxY() { return maxYCache; }
 function prompterActive() {
   return P.playing && !P.userPaused && !P.gazePaused && !S.voiceFollow;
 }
@@ -414,13 +434,14 @@ function followWords(heard) {
   }
 }
 function resetPrompter() {
+  measurePrompter();
   P.y = 0; P.matched = -1; P.targetY = null;
   P.spans.forEach((s) => s.classList.remove('done', 'cur'));
   layoutPrompter();
 }
 
 // ---------------------------------------------------------------- eye contact (MediaPipe)
-const G = { landmarker: null, loading: false, last: 0, h: 0, v: 0, yaw: 0, pitch: 0, ok: null, badSince: 0, calibSamples: null, okFrames: 0, totFrames: 0 };
+const G = { landmarker: null, worker: null, ready: false, busy: false, loading: false, last: 0, h: 0, v: 0, yaw: 0, pitch: 0, ok: undefined, badSince: 0, calibSamples: null, okFrames: 0, totFrames: 0 };
 bindCheck('eyeAutoPause');
 bindRange('sens', 'sensLbl', (v) => v);
 $('eyeOn').addEventListener('change', async (e) => {
@@ -433,7 +454,7 @@ $('eyeOn').addEventListener('change', async (e) => {
 $('calibBtn').addEventListener('click', async () => {
   if (!S.eyeOn) { $('eyeOn').checked = true; $('eyeOn').dispatchEvent(new Event('change')); }
   await loadLandmarker();
-  if (!G.landmarker) return;
+  if (!G.ready) return;
   G.calibSamples = [];
   $('eyeStatus').textContent = 'Tumingin sa camera lens…';
   await sleep(2000);
@@ -445,24 +466,45 @@ $('calibBtn').addEventListener('click', async () => {
   $('eyeStatus').textContent = 'Calibrated ✓';
 });
 
+// The face model runs in a Web Worker (gaze-worker.js) so it never blocks the camera
+// preview, the teleprompter or the recorder. If workers are unavailable it falls back to
+// running on the main thread.
+function mpUrls(local) {
+  return local ? { bundle: `${MP_LOCAL}/vision_bundle_worker.js`, wasm: `${MP_LOCAL}/wasm`, model: MP_LOCAL_MODEL }
+               : { bundle: `${MP_CDN}/vision_bundle.cjs`, wasm: `${MP_CDN}/wasm`, model: MP_CDN_MODEL };
+}
+function startWorker(urls) {
+  return new Promise((resolve, reject) => {
+    let w;
+    try { w = new Worker(new URL('./gaze-worker.js', location.href)); } catch (e) { reject(e); return; }
+    const t = setTimeout(() => { w.terminate(); reject(new Error('timeout')); }, 30000);
+    w.onmessage = (e) => {
+      if (e.data.type === 'ready') { clearTimeout(t); resolve(w); }
+      else if (e.data.type === 'error') { clearTimeout(t); w.terminate(); reject(new Error(e.data.msg)); }
+    };
+    w.onerror = (e) => { clearTimeout(t); w.terminate(); reject(new Error(e.message || 'worker error')); };
+    w.postMessage({ type: 'init', ...urls });
+  });
+}
 async function loadLandmarker() {
-  if (G.landmarker || G.loading) return;
+  if (G.ready || G.loading) return;
   G.loading = true;
   $('eyeStatus').textContent = 'Nilo-load ang face model (≈4 MB)…';
   els.gazeText.textContent = 'Loading…';
   try {
-    let mod, base = MP_LOCAL, model = MP_LOCAL_MODEL;
-    try { mod = await import(`${MP_LOCAL}/vision_bundle.mjs`); }
-    catch { base = MP_CDN; model = MP_CDN_MODEL; mod = await import(`${MP_CDN}/vision_bundle.mjs`); }
-    const { FaceLandmarker, FilesetResolver } = mod;
-    const fileset = await FilesetResolver.forVisionTasks(`${base}/wasm`);
-    const opts = (delegate) => ({
-      baseOptions: { modelAssetPath: model, delegate },
-      runningMode: 'VIDEO', numFaces: 1,
-      outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true,
-    });
-    try { G.landmarker = await FaceLandmarker.createFromOptions(fileset, opts('GPU')); }
-    catch { G.landmarker = await FaceLandmarker.createFromOptions(fileset, opts('CPU')); }
+    try { G.worker = await startWorker(mpUrls(true)); }
+    catch (e1) {
+      try { G.worker = await startWorker(mpUrls(false)); }
+      catch (e2) { console.warn('gaze worker unavailable, using main thread', e1, e2); await loadMainThreadLandmarker(); }
+    }
+    if (G.worker) {
+      G.worker.onmessage = (e) => {
+        if (e.data.type !== 'result') return;
+        G.busy = false;
+        handleGaze(e.data.bs, e.data.mat);
+      };
+    }
+    G.ready = true;
     $('eyeStatus').textContent = S.calib ? 'Handa na ✓ (may calibration)' : 'Handa na ✓ — i-calibrate para mas tumpak';
   } catch (e) {
     console.error(e);
@@ -471,20 +513,50 @@ async function loadLandmarker() {
   }
   G.loading = false;
 }
+async function loadMainThreadLandmarker() {
+  let mod, urls = mpUrls(true);
+  try { mod = await import(`${MP_LOCAL}/vision_bundle.mjs`); }
+  catch { urls = mpUrls(false); mod = await import(`${MP_CDN}/vision_bundle.mjs`); }
+  const fileset = await mod.FilesetResolver.forVisionTasks(urls.wasm);
+  G.landmarker = await mod.FaceLandmarker.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: urls.model, delegate: 'CPU' },
+    runningMode: 'VIDEO', numFaces: 1,
+    outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true,
+  });
+}
 
+// The face model only needs a small picture: a ~224px copy, about 6 times a second.
+const GZ_W = 224, GZ_INTERVAL = 160;
+let gzCanvas = null, gzCtx = null;
 function detectGaze(now) {
-  if (!G.landmarker || els.cam.readyState < 2 || now - G.last < 90) return;
+  const cam = els.cam;
+  if (!G.ready || cam.readyState < 2 || !cam.videoWidth || now - G.last < GZ_INTERVAL) return;
+  const gzH = Math.round(GZ_W * cam.videoHeight / cam.videoWidth);
+  if (G.worker) {
+    if (G.busy && now - G.last < 1500) return; // previous frame still being analysed
+    G.last = now; G.busy = true;
+    createImageBitmap(cam, { resizeWidth: GZ_W, resizeHeight: gzH, resizeQuality: 'low' })
+      .then((bmp) => G.worker.postMessage({ type: 'frame', bitmap: bmp, ts: now }, [bmp]))
+      .catch(() => { G.busy = false; });
+    return;
+  }
   G.last = now;
+  if (!gzCanvas) { gzCanvas = document.createElement('canvas'); gzCtx = gzCanvas.getContext('2d', { alpha: false, willReadFrequently: true }); }
+  if (gzCanvas.width !== GZ_W || gzCanvas.height !== gzH) { gzCanvas.width = GZ_W; gzCanvas.height = gzH; }
+  gzCtx.drawImage(cam, 0, 0, GZ_W, gzH);
   let r;
-  try { r = G.landmarker.detectForVideo(els.cam, now); } catch { return; }
-  if (!r.faceBlendshapes?.length) { setGaze(null); return; }
-  const b = {};
-  for (const c of r.faceBlendshapes[0].categories) b[c.categoryName] = c.score;
+  try { r = G.landmarker.detectForVideo(gzCanvas, now); } catch { return; }
+  const bs = {};
+  if (r.faceBlendshapes?.length) for (const c of r.faceBlendshapes[0].categories) bs[c.categoryName] = c.score;
+  handleGaze(r.faceBlendshapes?.length ? bs : null, r.facialTransformationMatrixes?.[0]?.data || null);
+}
+
+function handleGaze(b, m) {
+  if (!b) { setGaze(null); return; }
   // Positive h = eyes turned to the subject's left, positive v = looking up.
   const h = ((b.eyeLookOutLeft + b.eyeLookInRight) - (b.eyeLookInLeft + b.eyeLookOutRight)) / 2;
   const v = ((b.eyeLookUpLeft + b.eyeLookUpRight) - (b.eyeLookDownLeft + b.eyeLookDownRight)) / 2;
   let yaw = 0, pitch = 0;
-  const m = r.facialTransformationMatrixes?.[0]?.data;
   if (m) {
     pitch = Math.atan2(m[6], m[10]) * 180 / Math.PI;
     yaw = Math.atan2(-m[2], Math.hypot(m[6], m[10])) * 180 / Math.PI;
@@ -505,10 +577,12 @@ function detectGaze(now) {
 }
 
 function setGaze(ok) {
+  if (ok !== G.ok) {
+    els.gazeBadge.classList.toggle('ok', ok === true);
+    els.gazeBadge.classList.toggle('bad', ok !== true);
+    els.gazeText.textContent = ok === null ? 'Walang mukha' : ok ? 'Eye contact ✓' : 'Tumingin sa camera ▲';
+  }
   G.ok = ok;
-  els.gazeBadge.classList.toggle('ok', ok === true);
-  els.gazeBadge.classList.toggle('bad', ok !== true);
-  els.gazeText.textContent = ok === null ? 'Walang mukha' : ok ? 'Eye contact ✓' : 'Tumingin sa camera ▲';
   if (recState === 'recording') { G.totFrames++; if (ok) G.okFrames++; }
   const now = performance.now();
   if (ok) { G.badSince = 0; P.gazePaused = false; }
@@ -521,8 +595,13 @@ function setGaze(ok) {
 // ---------------------------------------------------------------- recording
 let recState = 'idle'; // idle | countdown | recording | paused
 let recorder = null, chunks = [], recMime = '', elapsed = 0, lastT = 0, wakeLock = null;
-const ctx2d = els.canvas.getContext('2d');
-els.canvas.width = OUT_W; els.canvas.height = OUT_H;
+const ctx2d = els.canvas.getContext('2d', { alpha: false, desynchronized: true });
+function setOutputSize() {
+  [OUT_W, OUT_H] = QUALITY[S.quality];
+  if (els.canvas.width !== OUT_W) els.canvas.width = OUT_W;
+  if (els.canvas.height !== OUT_H) els.canvas.height = OUT_H;
+}
+setOutputSize();
 
 function pickMime() {
   // H.264 MP4 first (best for TikTok / FB / IG uploads), then any MP4, then WebM.
@@ -558,12 +637,13 @@ async function beginRecording() {
     }
     els.countdown.classList.add('hidden');
   }
+  setOutputSize();
   drawFrame();
   const vTrack = els.canvas.captureStream(FPS).getVideoTracks()[0];
   const mixed = new MediaStream([vTrack, ...dest.stream.getAudioTracks()]);
   recMime = pickMime();
   try {
-    recorder = new MediaRecorder(mixed, { mimeType: recMime || undefined, videoBitsPerSecond: 6_000_000, audioBitsPerSecond: 160_000 });
+    recorder = new MediaRecorder(mixed, { mimeType: recMime || undefined, videoBitsPerSecond: QUALITY[S.quality][2], audioBitsPerSecond: 160_000 });
   } catch {
     recorder = new MediaRecorder(mixed);
   }
@@ -687,7 +767,7 @@ function updateRecUI() {
   els.pauseBtn.textContent = recState === 'paused' ? '●' : '❚❚';
   els.timer.classList.toggle('rec', recState === 'recording');
   document.getElementById('durations').style.visibility = recState === 'idle' ? 'visible' : 'hidden';
-  if (recState === 'idle' && !active) { els.timer.textContent = '00:00'; els.progressBar.style.width = '0'; }
+  if (recState === 'idle' && !active) { els.timer.textContent = '00:00'; els.progressBar.style.transform = 'scaleX(0)'; lastSec = -1; }
 }
 
 // Free the camera and mic when the app goes to the background (unless recording),
@@ -715,7 +795,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ---------------------------------------------------------------- main loop
-let prevT = performance.now();
+let prevT = performance.now(), lastSec = -1, prompterShown = null;
 function tick(now) {
   const dt = Math.min(0.1, (now - prevT) / 1000); prevT = now;
 
@@ -724,8 +804,12 @@ function tick(now) {
   if (recState === 'recording') {
     drawFrame();
     elapsed += (now - lastT) / 1000; lastT = now;
-    els.timer.textContent = fmt(elapsed);
-    els.progressBar.style.width = Math.min(100, (elapsed / S.maxDur) * 100) + '%';
+    const sec = Math.floor(elapsed);
+    if (sec !== lastSec) {
+      lastSec = sec;
+      els.timer.textContent = fmt(elapsed);
+      els.progressBar.style.transform = `scaleX(${Math.min(1, elapsed / S.maxDur)})`;
+    }
     if (elapsed >= S.maxDur) stopRecording();
   }
 
@@ -738,7 +822,7 @@ function tick(now) {
     P.y = Math.min(maxY(), P.y + S.speed * lineH() * 0.08 * dt);
     layoutPrompter();
   }
-  els.prompter.classList.toggle('hidden', !S.prompterOn);
+  if (prompterShown !== S.prompterOn) { prompterShown = S.prompterOn; els.prompter.classList.toggle('hidden', !S.prompterOn); }
 
   requestAnimationFrame(tick);
 }

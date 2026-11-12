@@ -12,7 +12,7 @@ const modelCache = path.join(root, 'node_modules', '.cache', 'face_landmarker.ta
 
 await rm(www, { recursive: true, force: true });
 await mkdir(vendor, { recursive: true });
-for (const f of ['style.css', 'app.js']) await cp(path.join(root, f), path.join(www, f));
+for (const f of ['style.css', 'app.js', 'gaze-worker.js']) await cp(path.join(root, f), path.join(www, f));
 
 // Capacitor core JS (provides Capacitor.registerPlugin in the APK). Must load before app.js.
 await cp(path.join(root, 'node_modules', '@capacitor', 'core', 'dist', 'capacitor.js'), path.join(vendor, 'capacitor.js'));
@@ -23,6 +23,7 @@ await writeFile(path.join(www, 'index.html'), html.replace(tag, '<script src="ve
 
 const mp = path.join(root, 'node_modules', '@mediapipe', 'tasks-vision');
 await cp(path.join(mp, 'vision_bundle.mjs'), path.join(vendor, 'tasks-vision', 'vision_bundle.mjs'));
+await cp(path.join(mp, 'vision_bundle.cjs'), path.join(vendor, 'tasks-vision', 'vision_bundle_worker.js')); // CJS build for gaze-worker.js (.js so it is served as JavaScript)
 await cp(path.join(mp, 'wasm'), path.join(vendor, 'tasks-vision', 'wasm'), { recursive: true });
 
 try { await access(modelCache); } catch {

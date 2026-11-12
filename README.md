@@ -28,6 +28,11 @@ Web app ito (HTML/CSS/JS lang, walang server). Gumagana sa Chrome/Edge (Android 
 
 Mga shortcut sa PC: `Space` = record / pause, `Esc` = stop.
 
+### Kung mabagal o nagla-lag
+- Sa **♪ Music → Kalidad ng video**, piliin ang **540p**. Mas magaan ito para sa luma o mabagal na phone.
+- Patayin ang **👁 Eye** detector kung hindi mo kailangan.
+- Isara ang ibang app na tumatakbo sa background.
+
 ### Mga tip para sa eye contact
 - Ilagay ang phone sa **eye level** mo, at medyo malayo (mga isang braso).
 - Gawing **makitid** ang teleprompter (40–60%) at **2–4 na linya** lang para malapit sa lens ang binabasa mo.

@@ -37,8 +37,8 @@ button { font: inherit; color: inherit; cursor: pointer; border: 0; background: 
 /* ---------- Teleprompter ---------- */
 #prompter { position: absolute; top: 22px; left: 50%; transform: translateX(-50%); width: 60%;
   --fs: 26px; --lines: 4; height: calc(var(--fs) * 1.35 * var(--lines) + 16px);
-  background: rgba(0,0,0,.55); border-radius: 14px; overflow: hidden; z-index: 5;
-  touch-action: none; user-select: none; backdrop-filter: blur(2px); }
+  background: rgba(0,0,0,.62); border-radius: 14px; overflow: hidden; z-index: 5;
+  touch-action: none; user-select: none; contain: strict; }
 #prompterScroll { position: absolute; inset: 0; overflow: hidden;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14%, #000 78%, transparent 100%);
           mask-image: linear-gradient(to bottom, transparent 0, #000 14%, #000 78%, transparent 100%); }
@@ -67,7 +67,7 @@ button { font: inherit; color: inherit; cursor: pointer; border: 0; background: 
 #musicTag { background: rgba(0,0,0,.5); padding: 2px 8px; border-radius: 8px; max-width: 45%; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
 #progress { position: absolute; bottom: 0; left: 0; right: 0; height: 4px; background: rgba(255,255,255,.15); z-index: 4; }
-#progressBar { height: 100%; width: 0; background: var(--accent); }
+#progressBar { height: 100%; width: 100%; background: var(--accent); transform: scaleX(0); transform-origin: left; }
 
 #countdown { position: absolute; inset: 0; display: grid; place-items: center; font-size: 140px; font-weight: 800;
   text-shadow: 0 4px 30px rgba(0,0,0,.6); z-index: 8; pointer-events: none; }
