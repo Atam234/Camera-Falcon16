@@ -33,6 +33,30 @@ Mga shortcut sa PC: `Space` = record / pause, `Esc` = stop.
 - Gawing **makitid** ang teleprompter (40–60%) at **2–4 na linya** lang para malapit sa lens ang binabasa mo.
 - Kapag may **earphones** ka, hindi mapapasok sa mic ang music, kaya mas malinis ang tunog.
 
+## 📱 Android app (APK)
+
+Awtomatikong ginagawa ng **GitHub Actions** ang APK tuwing may push (`.github/workflows/android-apk.yml`).
+
+**Paano i-download at i-install:**
+1. Sa GitHub repo, pumunta sa **Releases**, tapos buksan ang **"Falcon Cam APK (pinakabagong build)"** (tag `latest-apk`).
+   Nasa **Actions**, sa pinakabagong run, sa ilalim ng *Artifacts* → `FalconCam-apk` din ito.
+2. I-download ang **FalconCam.apk** sa phone mo.
+3. Buksan ito, payagan ang *"Install unknown apps"* para sa browser o Files app mo, tapos **Install**.
+4. Pagbukas ng app, payagan ang **Camera** at **Microphone**.
+
+Sa app, ang **I-save ang Video** ay direktang naglalagay ng video sa **Gallery (Movies/FalconCam)**, at ang **Share** ay nagbubukas ng share menu ng Android (TikTok, FB, Messenger…). Naka-bundle sa APK ang face model kaya **gumagana ang eye detector kahit offline**.
+
+> Hindi gumagana ang *Voice-follow* sa loob ng APK, dahil wala ang speech recognition sa Android WebView. Gamitin ang normal na auto-scroll.
+
+**Pag-build sa sarili mong PC** (kailangan ang Node 22, JDK 21 at Android SDK):
+```bash
+npm ci
+npm run apk          # → android/app/build/outputs/apk/debug/app-debug.apk
+```
+O kaya `npm run sync` at buksan ang `android/` sa Android Studio.
+
+Gawa ang Android app gamit ang **[Capacitor](https://github.com/ionic-team/capacitor)** (MIT). May sariling maliit na native plugin (`FalconGalleryPlugin.java`) para sa pag-save sa Gallery at pag-share.
+
 ## Pag-host sa GitHub Pages (libre)
 
 1. Sa GitHub repo: **Settings → Pages**.
@@ -44,6 +68,7 @@ Pag-test sa PC: `python3 -m http.server 8000`, tapos buksan ang `http://localhos
 ## Mga open-source na ginamit
 
 - **[MediaPipe Tasks Vision / Face Landmarker](https://github.com/google-ai-edge/mediapipe)** (Apache-2.0) para sa face at eye tracking (blendshapes `eyeLookIn/Out/Up/Down` at head pose). Nilo-load mula sa jsDelivr CDN, `@mediapipe/tasks-vision@0.10.14`.
+- **[Capacitor](https://github.com/ionic-team/capacitor)** (MIT) para gawing Android app (APK) ang web app.
 - Mga web standard API: `getUserMedia`, `MediaRecorder`, Web Audio (para i-mix ang music at mic), `canvas.captureStream`, Web Speech API (para sa voice-follow), Screen Wake Lock.
 
 ## Mga limitasyon

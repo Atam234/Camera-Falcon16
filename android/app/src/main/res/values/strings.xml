@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Falcon Cam</string>
+    <string name="title_activity_main">Falcon Cam</string>
+    <string name="package_name">com.falconcam.app</string>
+    <string name="custom_url_scheme">com.falconcam.app</string>
+</resources>

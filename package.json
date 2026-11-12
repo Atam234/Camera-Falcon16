@@ -1,0 +1,20 @@
+{
+  "name": "falcon-cam",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TikTok-style video camera with own background music, eye-level teleprompter and eye-contact detector",
+  "license": "MIT",
+  "scripts": {
+    "build": "node scripts/build-web.mjs",
+    "sync": "npm run build && npx cap sync android",
+    "apk": "npm run sync && cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.6.0",
+    "@capacitor/core": "8.6.0",
+    "@mediapipe/tasks-vision": "0.10.14"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.0"
+  }
+}

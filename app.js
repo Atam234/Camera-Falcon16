@@ -7,8 +7,15 @@
 //    Web Speech API (voice-follow scrolling)
 
 const MP_VERSION = '0.10.14';
-const MP_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`;
-const MP_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+const MP_CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`;
+const MP_CDN_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+// Bundled copies (in the APK, see scripts/build-web.mjs) so the detector works offline.
+const MP_LOCAL = new URL('./vendor/tasks-vision', location.href).href;
+const MP_LOCAL_MODEL = new URL('./vendor/face_landmarker.task', location.href).href;
+
+// Android app (Capacitor): native plugin that saves to the gallery / opens the share sheet.
+const IS_NATIVE = !!window.Capacitor?.isNativePlatform?.();
+const NativeGallery = IS_NATIVE ? window.Capacitor.registerPlugin('FalconGallery') : null;
 
 const OUT_W = 720, OUT_H = 1280, FPS = 30;
 
@@ -387,10 +394,13 @@ async function loadLandmarker() {
   $('eyeStatus').textContent = 'Nilo-load ang face model (≈4 MB)…';
   els.gazeText.textContent = 'Loading…';
   try {
-    const { FaceLandmarker, FilesetResolver } = await import(`${MP_BASE}/vision_bundle.mjs`);
-    const fileset = await FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
+    let mod, base = MP_LOCAL, model = MP_LOCAL_MODEL;
+    try { mod = await import(`${MP_LOCAL}/vision_bundle.mjs`); }
+    catch { base = MP_CDN; model = MP_CDN_MODEL; mod = await import(`${MP_CDN}/vision_bundle.mjs`); }
+    const { FaceLandmarker, FilesetResolver } = mod;
+    const fileset = await FilesetResolver.forVisionTasks(`${base}/wasm`);
     const opts = (delegate) => ({
-      baseOptions: { modelAssetPath: MP_MODEL, delegate },
+      baseOptions: { modelAssetPath: model, delegate },
       runningMode: 'VIDEO', numFaces: 1,
       outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true,
     });
@@ -555,11 +565,50 @@ function finishRecording() {
   const mb = (resultBlob.size / 1048576).toFixed(1);
   const eye = G.totFrames ? ` · Eye contact: ${Math.round((G.okFrames / G.totFrames) * 100)}%` : '';
   els.resultStats.textContent = `${fmt(elapsed)} · ${mb} MB · ${ext.toUpperCase()}${eye}`;
-  const file = new File([resultBlob], name, { type });
-  els.shareBtn.classList.toggle('hidden', !(navigator.canShare && navigator.canShare({ files: [file] })));
-  els.shareBtn.onclick = () => navigator.share({ files: [file], title: 'Falcon Cam video' }).catch(() => {});
+  if (IS_NATIVE) {
+    // Hand the video to the Android side right away; Save/Share wait for it.
+    nativeReady = sendToNative(resultBlob, name, type);
+    els.shareBtn.classList.remove('hidden');
+    els.shareBtn.onclick = async () => {
+      try { await nativeReady; await NativeGallery.share(); } catch (e) { toast('Hindi ma-share: ' + (e.message || e)); }
+    };
+  } else {
+    const file = new File([resultBlob], name, { type });
+    els.shareBtn.classList.toggle('hidden', !(navigator.canShare && navigator.canShare({ files: [file] })));
+    els.shareBtn.onclick = () => navigator.share({ files: [file], title: 'Falcon Cam video' }).catch(() => {});
+  }
   els.result.classList.remove('hidden');
 }
+
+let nativeReady = null;
+const blobToBase64 = (b) => new Promise((res, rej) => {
+  const r = new FileReader();
+  r.onload = () => res(String(r.result).split(',')[1] || '');
+  r.onerror = () => rej(r.error);
+  r.readAsDataURL(b);
+});
+async function sendToNative(blob, name, mime) {
+  await NativeGallery.begin({ name, mime });
+  const CHUNK = 768 * 1024;
+  for (let i = 0; i < blob.size; i += CHUNK) {
+    await NativeGallery.append({ data: await blobToBase64(blob.slice(i, i + CHUNK)) });
+  }
+  await NativeGallery.end();
+}
+els.downloadBtn.addEventListener('click', async (e) => {
+  if (!IS_NATIVE) return; // browsers use the normal download link
+  e.preventDefault();
+  const label = els.downloadBtn.textContent;
+  els.downloadBtn.textContent = 'Sine-save…';
+  try {
+    await nativeReady;
+    const r = await NativeGallery.save();
+    toast('Na-save sa Gallery ✓ (' + (r.path || 'Movies/FalconCam') + ')', 3500);
+  } catch (err) {
+    toast('Hindi na-save: ' + (err.message || err), 4000);
+  }
+  els.downloadBtn.textContent = label;
+});
 els.retakeBtn.addEventListener('click', () => {
   els.resultVideo.pause(); els.result.classList.add('hidden');
   resetPrompter(); P.playing = false; updateRecUI();
