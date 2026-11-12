@@ -14,8 +14,15 @@ const MP_LOCAL = new URL('./vendor/tasks-vision', location.href).href;
 const MP_LOCAL_MODEL = new URL('./vendor/face_landmarker.task', location.href).href;
 
 // Android app (Capacitor): native plugin that saves to the gallery / opens the share sheet.
+// registerPlugin comes from vendor/capacitor.js (@capacitor/core), which the build adds to the APK.
 const IS_NATIVE = !!window.Capacitor?.isNativePlatform?.();
-const NativeGallery = IS_NATIVE ? window.Capacitor.registerPlugin('FalconGallery') : null;
+let NativeGallery = null;
+if (IS_NATIVE) {
+  try {
+    const reg = window.capacitorExports?.registerPlugin || window.Capacitor.registerPlugin;
+    NativeGallery = reg('FalconGallery');
+  } catch (e) { console.error('FalconGallery plugin unavailable', e); }
+}
 
 const OUT_W = 720, OUT_H = 1280, FPS = 30;
 
@@ -64,6 +71,14 @@ const S = {
 };
 
 // ---------------------------------------------------------------- utils
+function showFatal(msg) {
+  const el = document.getElementById('startErr');
+  if (el && !document.getElementById('startOverlay').classList.contains('hidden')) el.textContent = 'Error: ' + msg;
+  else toast('Error: ' + msg, 5000);
+}
+window.addEventListener('error', (e) => showFatal(e.message));
+window.addEventListener('unhandledrejection', (e) => showFatal(e.reason?.message || String(e.reason)));
+
 let toastTimer;
 function toast(msg, ms = 2200) {
   els.toast.textContent = msg;

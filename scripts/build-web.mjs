@@ -1,6 +1,6 @@
 // Copies the web app into www/ for Capacitor and bundles MediaPipe + the face model,
 // so the eye-contact detector works offline inside the APK.
-import { cp, mkdir, rm, writeFile, access } from 'node:fs/promises';
+import { cp, mkdir, rm, writeFile, readFile, access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -12,7 +12,14 @@ const modelCache = path.join(root, 'node_modules', '.cache', 'face_landmarker.ta
 
 await rm(www, { recursive: true, force: true });
 await mkdir(vendor, { recursive: true });
-for (const f of ['index.html', 'style.css', 'app.js']) await cp(path.join(root, f), path.join(www, f));
+for (const f of ['style.css', 'app.js']) await cp(path.join(root, f), path.join(www, f));
+
+// Capacitor core JS (provides Capacitor.registerPlugin in the APK). Must load before app.js.
+await cp(path.join(root, 'node_modules', '@capacitor', 'core', 'dist', 'capacitor.js'), path.join(vendor, 'capacitor.js'));
+const html = await readFile(path.join(root, 'index.html'), 'utf8');
+const tag = '<script type="module" src="app.js"></script>';
+if (!html.includes(tag)) throw new Error('index.html: app.js script tag not found');
+await writeFile(path.join(www, 'index.html'), html.replace(tag, '<script src="vendor/capacitor.js"></script>\n  ' + tag));
 
 const mp = path.join(root, 'node_modules', '@mediapipe', 'tasks-vision');
 await cp(path.join(mp, 'vision_bundle.mjs'), path.join(vendor, 'tasks-vision', 'vision_bundle.mjs'));

@@ -17,7 +17,13 @@ button { font: inherit; color: inherit; cursor: pointer; border: 0; background: 
 .muted { color: var(--muted); }
 .small { font-size: 13px; }
 
-#app { position: fixed; inset: 0; display: flex; justify-content: center; align-items: center; }
+/* Keep clear of the Android status/navigation bars. Capacitor sets --safe-area-inset-*
+   in the APK; browsers use env(). */
+#app { position: fixed;
+  top: max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px));
+  bottom: max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px));
+  left: max(env(safe-area-inset-left, 0px), var(--safe-area-inset-left, 0px));
+  right: max(env(safe-area-inset-right, 0px), var(--safe-area-inset-right, 0px)); display: flex; justify-content: center; align-items: center; }
 
 /* ---------- Stage ---------- */
 #stage { position: relative; height: 100%; aspect-ratio: 9 / 16; max-width: 100%; background: #111; overflow: hidden; }
@@ -86,7 +92,7 @@ button { font: inherit; color: inherit; cursor: pointer; border: 0; background: 
 .tool.on .ic { background: var(--accent); }
 
 /* ---------- Bottom ---------- */
-#bottom { position: absolute; left: 0; right: 0; bottom: max(14px, env(safe-area-inset-bottom)); display: flex;
+#bottom { position: absolute; left: 0; right: 0; bottom: 14px; display: flex;
   flex-direction: column; align-items: center; gap: 12px; z-index: 10; pointer-events: none; }
 #bottom > * { pointer-events: auto; }
 #durations { display: flex; gap: 6px; background: rgba(0,0,0,.45); padding: 4px; border-radius: 99px; }
